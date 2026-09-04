@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>الرسم في الهواء — Air Draw</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,650&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<style>
+  /* ============================================================
+     TOKENS — نظام الألوان والخطوط
+     خلفية داكنة بلون تيل-فحمي (وحي بغرفة تحميض الصور / أدوات القياس
+     الضوئي القديمة)، مع لمستين لونيتين: عنبري (نشِط/مؤشر) وقرمزي
+     (تسجيل/ممحاة). الخط العريض Fraunces للعناوين، وMono لقراءات الحالة.
+     ============================================================ */
+  :root{
+    --bg-deep:   #10181C;
+    --bg-panel:  #17222A;
+    --bg-panel-2:#1D2A33;
+    --line:      #2B3A44;
+    --amber:     #E8A33D;
+    --amber-dim: #8A6A34;
+    --crimson:   #D6584A;
+    --ink:       #F2EFE9;
+    --ink-muted: #8FA3AC;
+  }
+
+  *{ box-sizing:border-box; }
+
+  html,body{
+    margin:0; padding:0;
+    background:
+      radial-gradient(circle at 18% 12%, rgba(232,163,61,0.07), transparent 40%),
+      radial-gradient(circle at 85% 90%, rgba(214,88,74,0.06), transparent 45%),
+      var(--bg-deep);
+    color:var(--ink);
+    font-family:'JetBrains Mono', monospace;
+    min-height:100vh;
+  }
+
+  .display{ font-family:'Fraunces', serif; }
+
+  /* ------------------- الرأس ------------------- */
+  header{
+    padding:28px 32px 10px;
+    text-align:center;
+  }
+  header .eyebrow{
+    font-size:11px; letter-spacing:.25em; color:var(--amber);
+    text-transform:uppercase; margin-bottom:8px;
+  }
+  header h1{
+    font-size:clamp(28px,4vw,44px);
+    font-weight:650;
+    margin:0 0 6px;
+    color:var(--ink);
+  }
+  header p{
+    color:var(--ink-muted);
+    font-size:13px;
+    margin:0 auto;
+    max-width:520px;
+    line-height:1.7;
+  }
+
+  /* ------------------- المسرح / الفيوفايندر ------------------- */
+  .stage-wrap{
+    display:flex;
+    justify-content:center;
+    padding:20px 16px 8px;
+  }
+  .viewfinder{
+    position:relative;
+    width:min(920px, 94vw);
+    /* نسبة افتراضية مؤقتة إلى حين معرفة أبعاد الكاميرا الحقيقية عبر JS،
+       بحيث تُعرض الصورة كاملة دون تشويه أو قصّ */
+    aspect-ratio: 4 / 3;
+    border-radius:6px;
+    overflow:hidden;
+    background:#000;
+    box-shadow:0 30px 60px -20px rgba(0,0,0,.6);
+  }
+  .viewfinder canvas{
+    width:100%; height:100%;
+    display:block;
+    cursor:crosshair;
+  }
+  /* الفيديو ليس display:none لأن بعض المتصفحات تُوقف تحديث الإطارات
+     للعناصر المخفية بالكامل؛ هنا نُبعده عن الشاشة بدل إخفائه */
+  video{
+    position:absolute;
+    width:2px; height:2px;
+    opacity:0;
+    pointer-events:none;
+    left:-9999px; top:-9999px;
+  }
+
+  /* زوايا الفيوفايندر — العنصر المميز في التصميم */
+  .bracket{
+    position:absolute;
+    width:34px; height:34px;
+    border:2px solid var(--amber-dim);
+    transition:border-color .3s ease, filter .3s ease;
+    pointer-events:none;
+    z-index:5;
+  }
+  .bracket.locked{
+    border-color:var(--amber);
+    filter:drop-shadow(0 0 6px rgba(232,163,61,.65));
+  }
+  .b-tl{ top:10px; left:10px; border-width:2px 0 0 2px; }
+  .b-tr{ top:10px; right:10px; border-width:2px 2px 0 0; }
+  .b-bl{ bottom:10px; left:10px; border-width:0 0 2px 2px; }
+  .b-br{ bottom:10px; right:10px; border-width:0 2px 2px 0; }
+
+  .rec-dot{
+    position:absolute; top:16px; left:16px;
+    display:flex; align-items:center; gap:6px;
+    font-size:11px; letter-spacing:.12em; color:var(--ink-muted);
+    z-index:5;
+  }
+  .rec-dot span.dot{
+    width:8px; height:8px; border-radius:50%;
+    background:var(--crimson);
+    box-shadow:0 0 8px rgba(214,88,74,.8);
+  }
+  .rec-dot.off span.dot{ background:#4a4a4a; box-shadow:none; }
+
+  .permission-msg{
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; padding:24px;
+    color:var(--ink-muted); font-size:13px; line-height:1.8;
+    background:rgba(16,24,28,.92);
+    z-index:10;
+  }
+  .permission-msg button{
+    margin-top:14px;
+    background:var(--amber); color:#1a1206; border:none;
+    font-family:'JetBrains Mono',monospace; font-weight:700;
+    padding:10px 22px; border-radius:4px; cursor:pointer;
+    letter-spacing:.05em;
+  }
+
+  /* ------------------- شريط القياسات (HUD) ------------------- */
+  .hud{
+    display:flex; flex-wrap:wrap; justify-content:center; gap:14px;
+    padding:18px 16px 6px;
+  }
+  .gauge{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:6px;
+    padding:10px 18px;
+    min-width:120px;
+    text-align:center;
+  }
+  .gauge .label{
+    font-size:10px; letter-spacing:.18em; color:var(--ink-muted);
+    text-transform:uppercase; margin-bottom:6px;
+  }
+  .gauge .value{
+    font-size:16px; font-weight:700; color:var(--ink);
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .swatch{
+    width:12px; height:12px; border-radius:3px;
+    display:inline-block; border:1px solid rgba(255,255,255,.25);
+  }
+
+  /* ------------------- لوحة التحكم ------------------- */
+  .controls{
+    display:flex; flex-wrap:wrap; gap:12px;
+    justify-content:center;
+    padding:18px 16px 40px;
+  }
+  .controls button{
+    font-family:'JetBrains Mono',monospace;
+    font-size:12px; letter-spacing:.06em;
+    background:var(--bg-panel);
+    color:var(--ink);
+    border:1px solid var(--line);
+    padding:11px 18px;
+    border-radius:5px;
+    cursor:pointer;
+    transition:border-color .2s, transform .15s;
+  }
+  .controls button:hover{ border-color:var(--amber-dim); transform:translateY(-1px); }
+  .controls button.primary{
+    background:var(--amber); color:#1a1206; border-color:var(--amber); font-weight:700;
+  }
+  .controls button.danger{
+    border-color:rgba(214,88,74,.5);
+  }
+  .controls .thickness-box{
+    display:flex; align-items:center; gap:10px;
+    background:var(--bg-panel); border:1px solid var(--line);
+    border-radius:5px; padding:8px 16px;
+  }
+  .controls .thickness-box label{ font-size:11px; color:var(--ink-muted); }
+  .controls input[type="range"]{ accent-color:var(--amber); }
+
+  /* ------------------- دليل الإشارات ------------------- */
+  .legend{
+    max-width:760px; margin:0 auto; padding:0 16px 50px;
+    display:grid; grid-template-columns:1fr 1fr; gap:14px;
+  }
+  @media (max-width:560px){ .legend{ grid-template-columns:1fr; } }
+  .legend .card{
+    background:var(--bg-panel);
+    border:1px solid var(--line);
+    border-radius:8px;
+    padding:16px 18px;
+    display:flex; gap:14px; align-items:flex-start;
+  }
+  .legend .icon{ font-size:26px; line-height:1; }
+  .legend .txt strong{
+    display:block; font-family:'Fraunces',serif; font-size:15px;
+    color:var(--ink); margin-bottom:4px; font-weight:600;
+  }
+  .legend .txt span{ color:var(--ink-muted); font-size:12px; line-height:1.7; }
+
+  footer{
+    text-align:center; padding-bottom:34px;
+    color:var(--ink-muted); font-size:11px; letter-spacing:.05em;
+  }
+</style>
+</head>
+<body>
+
+  <header>
+    <div class="eyebrow">Hand-Tracked Sketching</div>
+    <h1 class="display">الرسم في الهواء</h1>
+    <p>حرّك سبّابتك أمام الكاميرا لترسم في الفراغ. ارفع السبّابة والوسطى معاً للتوقف عن الرسم واختيار لون من الشريط العلوي.</p>
+  </header>
+
+  <div class="stage-wrap">
+    <div class="viewfinder" id="viewfinder">
+      <video id="video" playsinline></video>
+      <canvas id="output"></canvas>
+      <div class="bracket b-tl" id="bTL"></div>
+      <div class="bracket b-tr" id="bTR"></div>
+      <div class="bracket b-bl" id="bBL"></div>
+      <div class="bracket b-br" id="bBR"></div>
+      <div class="rec-dot off" id="recDot"><span class="dot"></span><span>TRACKING</span></div>
+      <div class="permission-msg" id="permMsg">
+        هذا التطبيق يحتاج إذن الوصول إلى الكاميرا ليعمل.<br>اسمح للمتصفح باستخدام الكاميرا للبدء.
+        <br>
+        <button id="startBtn">تفعيل الكاميرا</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hud">
+    <div class="gauge">
+      <div class="label">الوضع الحالي</div>
+      <div class="value" id="modeValue">— بانتظار اليد —</div>
+    </div>
+    <div class="gauge">
+      <div class="label">اللون</div>
+      <div class="value"><span class="swatch" id="colorSwatch" style="background:#D6584A"></span><span id="colorValue">أحمر</span></div>
+    </div>
+    <div class="gauge">
+      <div class="label">السماكة</div>
+      <div class="value" id="thicknessValue">8 px</div>
+    </div>
+    <div class="gauge">
+      <div class="label">معدل الإطارات</div>
+      <div class="value" id="fpsValue">0 FPS</div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="thickness-box">
+      <label for="thicknessSlider">سماكة الفرشاة</label>
+      <input type="range" id="thicknessSlider" min="2" max="60" value="8">
+    </div>
+    <button id="clearBtn" class="danger">🗑 مسح اللوحة</button>
+    <button id="saveBtn" class="primary">💾 حفظ الصورة</button>
+  </div>
+
+  <div class="legend">
+    <div class="card">
+      <div class="icon">☝️</div>
+      <div class="txt"><strong>وضع الرسم</strong><span>ارفع إصبع السبّابة فقط ليتحول الإصبع إلى فرشاة وتبدأ الخطوط بالتكوّن خلفه.</span></div>
+    </div>
+    <div class="card">
+      <div class="icon">✌️</div>
+      <div class="txt"><strong>وضع الاختيار</strong><span>ارفع السبّابة والوسطى معاً، ثم مرّرهما فوق الشريط العلوي داخل الكاميرا لاختيار لون أو الممحاة.</span></div>
+    </div>
+  </div>
+
+  <footer>يعمل بالكامل داخل المتصفح — لا يتم رفع أي فيديو أو صورة إلى أي خادم.</footer>
+
+<!-- مكتبة MediaPipe Hands لتتبع اليد -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<script>
+/* =====================================================================
+   إعداد عام
+   ===================================================================== */
+const COLORS = [
+  { name: "أحمر",    css: "#E4453A" },
+  { name: "أخضر",    css: "#3FBF6A" },
+  { name: "أزرق",    css: "#3A78E4" },
+  { name: "الممحاة", css: null }        // null = ممحاة (تمسح على طبقة الحبر)
+];
+
+const video   = document.getElementById('video');
+const canvas  = document.getElementById('output');
+const ctx     = canvas.getContext('2d');
+
+// طبقة الحبر: لوحة منفصلة تحتفظ بكل ما رُسم (تماماً مثل canvas في نسخة بايثون)
+const ink = document.createElement('canvas');
+const inkCtx = ink.getContext('2d');
+
+let W = 960, H = 600;          // أبعاد العمل الداخلية (تُحدَّث بعد فتح الكاميرا)
+const HEADER_H = 80;           // ارتفاع شريط الألوان العلوي
+let BTN_W = 0;
+
+let currentColorIndex = 0;
+let brushThickness = 8;
+const ERASER_THICKNESS = 42;
+
+let xp = null, yp = null;      // آخر نقطة تم الرسم منها
+let lastFrameTime = performance.now();
+
+// إحداثيات مُنعَّمة لطرف السبابة/الوسطى لتفادي ارتجاف الخط الناتج عن
+// ضجيج بسيط في كشف النقاط (Landmarks)، بحيث تتبع الفرشاة الإصبع فعلياً
+let smoothIx = null, smoothIy = null, smoothMx = null, smoothMy = null;
+const SMOOTHING = 0.55; // كلما زادت القيمة زادت الاستجابة السريعة (أقل تنعيم)
+
+function smooth(prev, current){
+  return prev === null ? current : prev + (current - prev) * SMOOTHING;
+}
+
+/* =====================================================================
+   عناصر الواجهة
+   ===================================================================== */
+const modeValue     = document.getElementById('modeValue');
+const colorValue    = document.getElementById('colorValue');
+const colorSwatch   = document.getElementById('colorSwatch');
+const thicknessValue= document.getElementById('thicknessValue');
+const fpsValue      = document.getElementById('fpsValue');
+const recDot        = document.getElementById('recDot');
+const brackets       = ['bTL','bTR','bBL','bBR'].map(id => document.getElementById(id));
+const permMsg        = document.getElementById('permMsg');
+const startBtn       = document.getElementById('startBtn');
+
+document.getElementById('thicknessSlider').addEventListener('input', e => {
+  brushThickness = parseInt(e.target.value, 10);
+  thicknessValue.textContent = brushThickness + ' px';
+});
+
+document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+document.getElementById('saveBtn').addEventListener('click', saveDrawing);
+startBtn.addEventListener('click', startCamera);
+
+function clearCanvas(){
+  inkCtx.clearRect(0, 0, ink.width, ink.height);
+}
+
+// حفظ الصورة النهائية (الفيديو + الرسم) كملف PNG — بديل cv2.imwrite
+function saveDrawing(){
+  const out = document.createElement('canvas');
+  out.width = W; out.height = H;
+  const octx = out.getContext('2d');
+  // الفيديو (مرآة) كخلفية
+  octx.save();
+  octx.translate(W, 0); octx.scale(-1, 1);
+  octx.drawImage(video, 0, 0, W, H);
+  octx.restore();
+  // طبقة الحبر فوقه
+  octx.drawImage(ink, 0, 0);
+
+  const link = document.createElement('a');
+  link.download = 'air-drawing-' + Date.now() + '.png';
+  link.href = out.toDataURL('image/png');
+  link.click();
+}
+
+/* =====================================================================
+   رسم الشريط العلوي (أزرار الألوان + الممحاة)
+   ===================================================================== */
+function drawHeader(){
+  BTN_W = W / COLORS.length;
+  COLORS.forEach((c, i) => {
+    const x = i * BTN_W;
+    ctx.fillStyle = c.css ? c.css : '#EFEFEF';
+    ctx.fillRect(x, 0, BTN_W, HEADER_H);
+
+    ctx.fillStyle = c.css ? 'rgba(255,255,255,.9)' : '#111';
+    ctx.font = '600 14px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(c.name, x + BTN_W / 2, HEADER_H / 2 + 5);
+
+    if (i === currentColorIndex){
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(x + 2, 2, BTN_W - 4, HEADER_H - 4);
+    }
+  });
+}
+
+function pickColorAt(px){
+  const idx = Math.floor(px / BTN_W);
+  if (idx >= 0 && idx < COLORS.length){
+    currentColorIndex = idx;
+    const c = COLORS[idx];
+    colorValue.textContent = c.name;
+    colorSwatch.style.background = c.css ? c.css : '#EFEFEF';
+  }
+}
+
+// السماح باختيار اللون بنقرة ماوس أيضاً (تسهيلاً على المستخدم)
+canvas.addEventListener('click', e => {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = W / rect.width;
+  const scaleY = H / rect.height;
+  const px = (e.clientX - rect.left) * scaleX;
+  const py = (e.clientY - rect.top) * scaleY;
+  if (py < HEADER_H) pickColorAt(px);
+});
+
+/* =====================================================================
+   تحديد ما إذا كان الإصبع مرفوعاً (نعتمد فقط على السبابة والوسطى)
+   إحداثي y في MediaPipe يكبر كلما اتجهنا للأسفل، تماماً كإحداثيات الصور
+   ===================================================================== */
+function isFingerUp(landmarks, tipId, pipId){
+  return landmarks[tipId].y < landmarks[pipId].y;
+}
+
+/* =====================================================================
+   استقبال نتائج تتبع اليد من MediaPipe في كل إطار
+   ===================================================================== */
+function onResults(results){
+  // ضبط الأبعاد الداخلية بناءً على أبعاد الكاميرا الفعلية القادمة من المتصفح
+  if (W !== results.image.width || H !== results.image.height){
+    W = results.image.width; H = results.image.height;
+    canvas.width = W; canvas.height = H;
+    ink.width = W; ink.height = H;
+
+    // أهم إصلاح: نجعل نسبة أبعاد إطار العرض تطابق نسبة الكاميرا الحقيقية
+    // بدل نسبة ثابتة مفروضة، حتى تظهر الصورة كاملة دون أي تشويه أو قصّ
+    document.getElementById('viewfinder').style.aspectRatio = `${W} / ${H}`;
+  }
+
+  ctx.clearRect(0, 0, W, H);
+
+  // رسم صورة الكاميرا مع قلبها أفقياً (تصرّف كالمرآة)
+  ctx.save();
+  ctx.translate(W, 0); ctx.scale(-1, 1);
+  ctx.drawImage(results.image, 0, 0, W, H);
+  ctx.restore();
+
+  const handFound = results.multiHandLandmarks && results.multiHandLandmarks.length > 0;
+  recDot.classList.toggle('off', !handFound);
+  brackets.forEach(b => b.classList.toggle('locked', handFound));
+
+  if (handFound){
+    const lm = results.multiHandLandmarks[0];
+
+    // تحويل إحداثيات السبابة (8) والوسطى (12) لمساحة العمل، مع القلب الأفقي
+    const rawIx = (1 - lm[8].x) * W,  rawIy = lm[8].y * H;   // طرف السبابة (خام)
+    const rawMx = (1 - lm[12].x) * W, rawMy = lm[12].y * H;  // طرف الوسطى (خام)
+
+    // تنعيم بسيط يجعل الفرشاة تتبع نقطة الإصبع الفعلية بثبات بدل الاهتزاز
+    smoothIx = smooth(smoothIx, rawIx); smoothIy = smooth(smoothIy, rawIy);
+    smoothMx = smooth(smoothMx, rawMx); smoothMy = smooth(smoothMy, rawMy);
+    const ix = smoothIx, iy = smoothIy;
+    const mx = smoothMx, my = smoothMy;
+
+    const indexUp  = isFingerUp(lm, 8, 6);
+    const middleUp = isFingerUp(lm, 12, 10);
+
+    if (indexUp && middleUp){
+      /* -------- وضع الاختيار -------- */
+      xp = yp = null;
+      modeValue.textContent = 'اختيار لون';
+
+      // مؤشر بصري بين الإصبعين
+      ctx.fillStyle = COLORS[currentColorIndex].css || 'rgba(255,255,255,.6)';
+      ctx.beginPath();
+      ctx.rect(Math.min(ix,mx)-10, Math.min(iy,my)-10, Math.abs(mx-ix)+20, Math.abs(my-iy)+20);
+      ctx.fill();
+
+      if (iy < HEADER_H) pickColorAt(ix);
+
+    } else if (indexUp && !middleUp){
+      /* -------- وضع الرسم -------- */
+      modeValue.textContent = 'رسم';
+
+      const activeColor = COLORS[currentColorIndex];
+      const thickness = activeColor.css ? brushThickness : ERASER_THICKNESS;
+
+      // مؤشر دائري عند طرف السبابة
+      ctx.beginPath();
+      ctx.arc(ix, iy, thickness/2 + 3, 0, Math.PI*2);
+      ctx.fillStyle = activeColor.css || '#ffffff';
+      ctx.fill();
+
+      if (xp !== null){
+        inkCtx.strokeStyle = activeColor.css || '#000000';
+        inkCtx.lineWidth = thickness;
+        inkCtx.lineCap = 'round';
+        if (!activeColor.css){
+          // الممحاة: نمسح فعلياً بدل الرسم بالأسود (شفافية حقيقية)
+          inkCtx.globalCompositeOperation = 'destination-out';
+        } else {
+          inkCtx.globalCompositeOperation = 'source-over';
+        }
+        inkCtx.beginPath();
+        inkCtx.moveTo(xp, yp);
+        inkCtx.lineTo(ix, iy);
+        inkCtx.stroke();
+      }
+      xp = ix; yp = iy;
+
+    } else {
+      xp = yp = null;
+      modeValue.textContent = 'يد بلا إشارة محددة';
+    }
+  } else {
+    xp = yp = null;
+    smoothIx = smoothIy = smoothMx = smoothMy = null; // تصفير التنعيم حتى لا تقفز الفرشاة عند عودة اليد
+    modeValue.textContent = '— بانتظار اليد —';
+  }
+
+  // دمج طبقة الحبر فوق صورة الكاميرا
+  ctx.drawImage(ink, 0, 0);
+
+  // رسم شريط الألوان في الأعلى
+  drawHeader();
+
+  // حساب معدل الإطارات (FPS)
+  const now = performance.now();
+  const fps = 1000 / (now - lastFrameTime);
+  lastFrameTime = now;
+  fpsValue.textContent = Math.round(fps) + ' FPS';
+}
+
+/* =====================================================================
+   تشغيل الكاميرا وربطها بنموذج MediaPipe Hands
+   ===================================================================== */
+const hands = new Hands({
+  locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.7,
+  minTrackingConfidence: 0.7
+});
+hands.onResults(onResults);
+
+async function startCamera(){
+  try{
+    // نستخدم "ideal" بدل فرض أبعاد ثابتة، حتى يعطينا المتصفح أقرب دقة
+    // ممكنة من الكاميرا الحقيقية دون قصّ الحقل البصري (Field of View)
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        width:  { ideal: 1280 },
+        height: { ideal: 720 },
+        facingMode: 'user'
+      }
+    });
+    video.srcObject = stream;
+    await video.play();
+    permMsg.style.display = 'none';
+
+    async function frameLoop(){
+      await hands.send({ image: video });
+      requestAnimationFrame(frameLoop);
+    }
+    frameLoop();
+  } catch (err){
+    permMsg.innerHTML = 'تعذّر الوصول إلى الكاميرا. تأكد من السماح بإذن الكاميرا من إعدادات المتصفح ثم أعد المحاولة.<br><button id="retryBtn">إعادة المحاولة</button>';
+    document.getElementById('retryBtn').addEventListener('click', startCamera);
+  }
+}
+
+// ضبط لوحة المفاتيح: c = مسح، s = حفظ، + / - = سماكة
+window.addEventListener('keydown', e => {
+  if (e.key === 'c') clearCanvas();
+  if (e.key === 's') saveDrawing();
+  if (e.key === '+' || e.key === '=') {
+    brushThickness = Math.min(60, brushThickness + 2);
+    document.getElementById('thicknessSlider').value = brushThickness;
+    thicknessValue.textContent = brushThickness + ' px';
+  }
+  if (e.key === '-' || e.key === '_') {
+    brushThickness = Math.max(2, brushThickness - 2);
+    document.getElementById('thicknessSlider').value = brushThickness;
+    thicknessValue.textContent = brushThickness + ' px';
+  }
+});
+</script>
+</body>
+</html>
